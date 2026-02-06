@@ -3,7 +3,7 @@
 This module contains:
 1. A simple code step (no agent) - runs Python code directly
 2. An agent step - handled by Bridge via Core API (no sidecar needed)
-3. A multi-turn API test step - verifies FORGE_API_URL/TOKEN injection and creates a session
+3. A multi-turn step - creates an agent session, sends prompts, validates output, retries
 """
 
 import json
@@ -52,43 +52,85 @@ def hello_agent_step(input_data: HelloAgentInput) -> HelloAgentOutput:
 
 
 # =============================================================================
-# Step 3: Multi-turn API connectivity test
+# Step 3: Multi-turn validated JSON generation
 # =============================================================================
 
-class MultiTurnTestInput(BaseModel):
-    message: str
+class ValidatedJsonInput(BaseModel):
+    agent_name: str = "default"
+    sandbox_definition_id: str = ""
 
 
-class MultiTurnTestOutput(BaseModel):
-    api_url: str
-    api_reachable: bool
-    agents: list
+class ValidatedJsonOutput(BaseModel):
+    session_id: str
+    result_json: dict
+    attempts: int
 
 
 @step()
-def multi_turn_api_test(input_data: MultiTurnTestInput) -> MultiTurnTestOutput:
-    """Verifies FORGE_API_URL and FORGE_API_TOKEN are injected and the API is reachable."""
+def validated_json_generation(input_data: ValidatedJsonInput) -> ValidatedJsonOutput:
+    """Creates an agent session, asks it to produce valid JSON, validates, retries if needed."""
     from bridge_sdk.multi_turn_client import MultiTurnClient
 
-    api_url = os.environ.get("FORGE_API_URL", "")
-    api_token = os.environ.get("FORGE_API_TOKEN", "")
+    client = MultiTurnClient()
 
-    if not api_url:
-        raise RuntimeError("FORGE_API_URL not set in environment")
-    if not api_token:
-        raise RuntimeError("FORGE_API_TOKEN not set in environment")
+    # Find agent
+    agents = client.list_agents(name=input_data.agent_name)
+    if not agents:
+        raise RuntimeError(f"No agent found with name '{input_data.agent_name}'")
+    agent_id = agents[0]["id"]
+    print(f"Using agent: {agent_id} ({input_data.agent_name})")
 
-    print(f"FORGE_API_URL={api_url}")
-    print(f"FORGE_API_TOKEN={'*' * 8}...{api_token[-4:]}")
-
-    client = MultiTurnClient(api_url=api_url, api_token=api_token)
-
-    # Test: list agents to verify connectivity and auth
-    agents = client.list_agents()
-    print(f"Found {len(agents)} agents")
-
-    return MultiTurnTestOutput(
-        api_url=api_url,
-        api_reachable=True,
-        agents=agents,
+    # Create session with initial prompt
+    sandbox_def_id = input_data.sandbox_definition_id or None
+    session = client.create_session(
+        agent_id=agent_id,
+        prompt='Write a valid JSON file at /tmp/result.json with these fields: "name" (a string), "age" (an integer), "hobbies" (an array of strings). Do not include any other text in the file, only valid JSON.',
+        sandbox_definition_id=sandbox_def_id,
     )
+    session_id = session["id"]
+    print(f"Created session: {session_id}")
+
+    # Wait for session to become running (initial prompt completes)
+    print("Waiting for session to be running...")
+    client.wait_for_state(session_id, {"running"}, timeout=300)
+    print("Session is running")
+
+    # Validate and retry loop
+    max_retries = 2
+    last_error = None
+    for attempt in range(1, max_retries + 2):
+        print(f"Attempt {attempt}: reading /tmp/result.json")
+        result = client.exec(session_id, ["cat", "/tmp/result.json"])
+
+        if result.get("exit_code", -1) != 0:
+            last_error = f"cat failed: exit_code={result.get('exit_code')}, stderr={result.get('stderr', '')}"
+            print(f"  {last_error}")
+        else:
+            try:
+                data = json.loads(result["stdout"])
+                assert isinstance(data.get("name"), str), "'name' must be a string"
+                assert isinstance(data.get("age"), int), "'age' must be an integer"
+                assert isinstance(data.get("hobbies"), list), "'hobbies' must be a list"
+                print(f"  Valid JSON: {data}")
+                client.finish(session_id)
+                return ValidatedJsonOutput(
+                    session_id=session_id,
+                    result_json=data,
+                    attempts=attempt,
+                )
+            except (json.JSONDecodeError, AssertionError) as e:
+                last_error = str(e)
+                print(f"  Validation failed: {last_error}")
+
+        if attempt <= max_retries:
+            print(f"  Sending retry prompt...")
+            cmd_id = client.prompt(
+                session_id,
+                f"The file /tmp/result.json is not valid. Error: {last_error}. "
+                "Please fix it. The file must contain only valid JSON with fields: "
+                '"name" (string), "age" (integer), "hobbies" (array of strings).',
+            )
+            client.wait_for_command(session_id, cmd_id, timeout=300)
+
+    client.finish(session_id)
+    raise RuntimeError(f"Failed after {max_retries + 1} attempts. Last error: {last_error}")
