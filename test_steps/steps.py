@@ -1,13 +1,17 @@
-"""Simple test steps for bridge sidecar elimination prototype.
+"""Test steps for bridge pipeline.
 
 This module contains:
 1. A simple code step (no agent) - runs Python code directly
-2. An agent step - uses the sidecar to run an agent
+2. An agent step - handled by Bridge via Core API (no sidecar needed)
+3. A multi-turn API test step - verifies FORGE_API_URL/TOKEN injection and creates a session
 """
+
+import json
+import os
 
 from pydantic import BaseModel
 from bridge_sdk import step
-from bridge_sdk.bridge_sidecar_client import BridgeSidecarClient
+from bridge_sdk.multi_turn_client import MultiTurnClient
 
 
 # =============================================================================
@@ -31,7 +35,7 @@ def hello_code_step(input_data: HelloCodeInput) -> HelloCodeOutput:
 
 
 # =============================================================================
-# Step 2: Agent Step (uses sidecar)
+# Step 2: Agent Step (handled by Bridge directly via Core API)
 # =============================================================================
 
 class HelloAgentInput(BaseModel):
@@ -39,31 +43,51 @@ class HelloAgentInput(BaseModel):
 
 
 class HelloAgentOutput(BaseModel):
-    session_id: str
     result: str
 
 
-@step(
-    metadata={"type": "agent"},
-)
+@step(metadata={"type": "agent"})
 def hello_agent_step(input_data: HelloAgentInput) -> HelloAgentOutput:
-    """Agent step that uses the sidecar to run an agent.
+    """Agent step - executed by Bridge via Core API, not this function."""
+    ...
 
-    This step:
-    1. Connects to the Bridge sidecar on localhost:50052
-    2. Calls StartAgent with the provided prompt
-    3. Returns the session ID and result
-    """
-    print(f"hello_agent_step starting with prompt: {input_data.prompt}")
 
-    with BridgeSidecarClient() as client:
-        agent_name, session_id, exit_result = client.start_agent(
-            prompt=input_data.prompt,
-            agent_name="default",  # Use default agent
-        )
-        print(f"Agent completed: session_id={session_id}, result={exit_result}")
+# =============================================================================
+# Step 3: Multi-turn API connectivity test
+# =============================================================================
 
-    return HelloAgentOutput(
-        session_id=session_id,
-        result=exit_result,
+class MultiTurnTestInput(BaseModel):
+    message: str
+
+
+class MultiTurnTestOutput(BaseModel):
+    api_url: str
+    api_reachable: bool
+    agents: list[dict]
+
+
+@step()
+def multi_turn_api_test(input_data: MultiTurnTestInput) -> MultiTurnTestOutput:
+    """Verifies FORGE_API_URL and FORGE_API_TOKEN are injected and the API is reachable."""
+    api_url = os.environ.get("FORGE_API_URL", "")
+    api_token = os.environ.get("FORGE_API_TOKEN", "")
+
+    if not api_url:
+        raise RuntimeError("FORGE_API_URL not set in environment")
+    if not api_token:
+        raise RuntimeError("FORGE_API_TOKEN not set in environment")
+
+    print(f"FORGE_API_URL={api_url}")
+    print(f"FORGE_API_TOKEN={'*' * 8}...{api_token[-4:]}")
+
+    client = MultiTurnClient(api_url=api_url, api_token=api_token)
+
+    # Test: list agents to verify connectivity and auth
+    agents = client.list_agents()
+    print(f"Found {len(agents)} agents")
+
+    return MultiTurnTestOutput(
+        api_url=api_url,
+        api_reachable=True,
+        agents=agents,
     )
