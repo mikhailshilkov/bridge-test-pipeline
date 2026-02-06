@@ -17,6 +17,24 @@ class MultiTurnClient:
         self.api_url = api_url or os.environ["FORGE_API_URL"]
         self.api_token = api_token or os.environ["FORGE_API_TOKEN"]
 
+    @staticmethod
+    def _normalize_keys(obj):
+        """Convert PascalCase keys to snake_case for consistent access."""
+        if isinstance(obj, dict):
+            normalized = {}
+            for k, v in obj.items():
+                # Convert PascalCase to snake_case
+                snake = ""
+                for i, c in enumerate(k):
+                    if c.isupper() and i > 0:
+                        snake += "_"
+                    snake += c.lower()
+                normalized[snake] = MultiTurnClient._normalize_keys(v)
+            return normalized
+        if isinstance(obj, list):
+            return [MultiTurnClient._normalize_keys(item) for item in obj]
+        return obj
+
     def _request(
         self,
         method: str,
@@ -34,7 +52,7 @@ class MultiTurnClient:
                 resp_body = resp.read()
                 if not resp_body:
                     return {}
-                return json.loads(resp_body)
+                return self._normalize_keys(json.loads(resp_body))
         except HTTPError as e:
             error_body = e.read().decode() if e.fp else ""
             raise RuntimeError(f"{method} {path} returned {e.code}: {error_body}") from e
