@@ -11,7 +11,6 @@ import os
 
 from pydantic import BaseModel
 from bridge_sdk import step
-from bridge_sdk.multi_turn_client import MultiTurnClient
 
 
 # =============================================================================
@@ -63,12 +62,14 @@ class MultiTurnTestInput(BaseModel):
 class MultiTurnTestOutput(BaseModel):
     api_url: str
     api_reachable: bool
-    agents: list[dict]
+    agents: list
 
 
 @step()
 def multi_turn_api_test(input_data: MultiTurnTestInput) -> MultiTurnTestOutput:
     """Verifies FORGE_API_URL and FORGE_API_TOKEN are injected and the API is reachable."""
+    from bridge_sdk.multi_turn_client import MultiTurnClient
+
     api_url = os.environ.get("FORGE_API_URL", "")
     api_token = os.environ.get("FORGE_API_TOKEN", "")
 
