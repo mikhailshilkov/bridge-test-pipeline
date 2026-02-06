@@ -207,10 +207,14 @@ def cmd_config_get_dsl(args):
         sys.exit(1)
     discover_steps(modules)
 
-    # Build DSL dictionary with steps
-    dsl_dict = {
+    # Build DSL dictionary with steps and pipelines
+    steps_dict = {
         step_name: step.step_data.model_dump()
         for (step_name, step) in STEP_REGISTRY.items()
+    }
+    dsl_dict = {
+        "steps": steps_dict,
+        "pipelines": {},
     }
 
     dsl_json = json.dumps(dsl_dict, indent=2)
