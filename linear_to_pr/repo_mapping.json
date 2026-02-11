@@ -1,0 +1,18 @@
+{
+  "projects": {
+    "FD": {
+      "default": {
+        "owner": "poolsideai",
+        "repo_name": "fdre-core",
+        "repo_url": "https://github.com/poolsideai/fdre-core.git",
+        "branch": "main"
+      }
+    }
+  },
+  "default": {
+    "owner": "poolsideai",
+    "repo_name": "forge",
+    "repo_url": "https://github.com/poolsideai/forge.git",
+    "branch": "main"
+  }
+}

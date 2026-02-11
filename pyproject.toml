@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [tool.bridge]
-modules = ["test_steps"]
+modules = ["test_steps", "linear_to_pr"]
 
 [project.scripts]
 bridge = "bridge_sdk.cli:main"
@@ -22,4 +22,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["bridge_sdk", "test_steps"]
+packages = ["bridge_sdk", "test_steps", "linear_to_pr"]
